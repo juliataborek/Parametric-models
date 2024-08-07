@@ -1,0 +1,706 @@
+---
+  title: "Projekt zaliczeniowy"
+author: "Julia Taborek & Natalia Machlus"
+date: "2024-05-24"
+output:
+  pdf_document: default
+html_document: default
+---
+  
+
+**Kontekst**
+  
+  Ta baza danych zawiera 76 atrybutów, ale wszystkie opublikowane eksperymenty odnoszą się do użycia podzbioru 14 z nich. Pole „target” odnosi się do obecności choroby serca u pacjenta. Jest to liczba całkowita 0 = brak/mniejsze prawdopodobieństwo zawału serca i 1 = większe prawdopodobieństwo zawału serca.
+
+**Opis zmiennych**
+  
+  Zbiór zawiera informacje o 303 pacjentach.
+
+
+**Zmienna objaśniana**
+  Nazwa zmiennej | Opis                                                                        |
+  ---------------|-----------------------------------------------------------------------------|
+ |
+  `target` |klasa wyjściowa [0 = mniejsze prawdopodobieństwo zawału serca 1 = większe prawdopodobieństwo zawału serca]    
+
+  
+**Zmienne objaśniające**
+  
+Nazwa zmiennej | Opis                                                                        |
+  ---------------|-----------------------------------------------------------------------------|
+  `age`          | wiek pacjenta [lata]
+|
+  `sex`          | płeć pacjenta [1: Mężczyzna, 0: Kobieta] 
+|
+  `cp`           | typ bólu w klatce piersiowej [wartości: 0,1,2,3]
+|
+  `trestbps`    | spoczynkowe ciśnienie krwi [mm Hg]                                     
+|
+  `chol`  | cholesterol w surowicy [mm/dl]                             
+|
+  `fbs`    | poziom cukru we krwi na czczo [1: jeśli > 120 mg/dl, 0: w przeciwnym razie]
+|
+  `restecg`   | spoczynkowe wyniki elektrokardiogramu [wartości 0,1,2]
+|
+  `thalach`        | osiągnięte maksymalne tętno                                                          
+|
+  `exang`| dławica wysiłkowa [1: tak, 0: nie]                                      
+|
+  `oldpeak`      | Obniżenie odcinka ST wywołane wysiłkiem fizycznym w stosunku do odpoczynku                  
+|
+  `slope`     | nachylenie szczytowego odcinka ST podczas ćwiczenia                  
+|
+  `ca` |liczba głównych naczyń  zabarwionych metodą fluorosopii [wartości od 0 do 3]                   
+|
+  `thal`     | 0 = normalny; 1 = usunięta usterka; 2 = wada odwracalna                    
+
+
+
+**Źródło**
+  
+https://www.kaggle.com/datasets/nareshbhat/health-care-data-set-on-heart-attack-possibility
+
+### Załadowanie pakietów
+```{r message=FALSE, warning=FALSE}
+library("vcd") # funkcja assocstats() - współczynniki kontyngencji
+library("lmtest") #testy LR i Walda globalne
+library("car") # funkcja vif()
+library("pscl") #pseudo-R2 funkcja pR2()
+library("pROC") #funkcje roc, auc
+library("ggplot2") # wykresy - funkcja ggplot()
+library(dplyr) 
+library("VIM")
+library(EnvStats)
+library(corrplot)
+library(RColorBrewer)
+library(writexl)
+library(broom)
+library(openxlsx)
+```
+
+### Wczytanie danych
+```{r}
+data <- read.csv("heart_2.csv", header = TRUE)
+```
+
+### Analiza wstępna
+```{r}
+duplikaty <- duplicated(data) | duplicated(data, fromLast = TRUE)
+
+data[duplikaty, ]
+```
+
+```{r}
+data <- data[-165,]
+```
+
+
+Zamiana zmiennch kategorialnych na factor:
+```{r}
+data$sex <- factor(data$sex)
+data$cp <- factor(data$cp)
+data$fbs <- factor(data$fbs)
+data$restecg <- factor(data$restecg)
+data$exang <- factor(data$exang)
+data$slope <- factor(data$slope)
+data$thal <- factor(data$thal)
+data$target <- factor(data$target)
+```
+
+
+Statystyki opisowe dla poszczególnych zmiennych: 
+```{r}
+summary(data)
+```
+
+#### Zmienne ilościowe
+
+**Wiek**
+
+```{r}
+data %>% ggplot(aes(x=age))+geom_histogram(aes(y=..density..), colour="black", fill="white")+
+          geom_density(alpha=.2, fill="#FF6666")+theme(axis.text = element_text(size = 10 ),
+                                                      axis.title = element_text(size = 10 )) + labs(x='Wiek', title = 'Rozkład wieku pacjentów', y='Gęstość')
+```
+
+**Ciśnienie spoczynkowe**
+
+```{r}
+data%>%ggplot(aes(x=trestbps))+geom_histogram(aes(y=..density..), colour="black", fill="white")+
+          geom_density(alpha=.2, fill="#FF6666") + theme(axis.text = element_text(size = 10 ),
+                                                      axis.title = element_text(size = 10)) +
+  labs(x='Spoczynkowe ciśnienie krwi [mm Hg]', title = 'Rozkład spoczynkowego ciśnienia krwi', y='Gęstość')
+```
+
+**Cholesterol**
+
+```{r}
+data%>%ggplot(aes(x=chol))+geom_histogram(aes(y=..density..), colour="black", fill="white")+
+          geom_density(alpha=.2, fill="#FF6666")+theme(axis.text = element_text(size = 10 ),
+                                                      axis.title = element_text(size = 10 )) + labs(title = 'Rozkład cholesterolu pacjentów', x = 'Cholesterol w surowicy [mg/dl]', y = 'Gęstość')
+```
+
+```{r}
+rosnerTest(data$chol, k = 10)
+```
+
+```{r}
+data <- data[data$chol < 564,]
+summary(data$chol)
+```
+**Thalach**
+
+```{r}
+data%>%ggplot(aes(x=thalach))+geom_histogram(aes(y=..density..), colour="black", fill="white")+
+          geom_density(alpha=.2, fill="#FF6666")+theme(axis.text = element_text(size = 10 ),
+                                                      axis.title = element_text(size = 10 )) +  labs(title = 'Rozkład maksymalnego tętna', y='Gęstość',x='Osiągnięte maksymalne tętno [bpm]')
+```
+
+
+**Oldpeak**
+
+```{r}
+data%>%ggplot(aes(x=oldpeak))+geom_histogram(aes(y=..density..), colour="black", fill="white")+
+          geom_density(alpha=.2, fill="#FF6666")+theme(axis.text = element_text(size = 10 ),
+                                                      axis.title = element_text(size = 10 )) +  labs(title = 'Rozkład zmiennej oldpeak', y='Gęstość',x='Obniżenie odcinka ST wywołane wysiłkiem fizycznym \n w stosunku do odpoczynku [mm]')
+```
+
+```{r}
+sum(data$oldpeak == 0) / nrow(data)
+rosnerTest(data$oldpeak, k = 10)
+```
+**ca**
+
+```{r}
+ggplot(data , aes(x=ca, fill=factor(ca))) + 
+  geom_bar() +
+  labs(title = "Rozkład liczby głównych naczyń zabarwionych metodą fluoroskopii",
+       x = "Liczba głównych naczyń zabarwionych metodą fluoroskopii ",
+       y = "Liczebność") +
+ theme(axis.text = element_text(size = 10 ), axis.title = element_text(size = 10 ), legend.position = "none")  +
+  scale_fill_brewer(palette="Blues")
+```
+
+#### Zmienne kategorialne:
+
+**Target**
+
+```{r}
+ggplot(data, aes(x = target, fill = target)) +
+  geom_bar() +
+  labs(title = "Rozkład zmiennej objaśnianej",
+       x = "Zmienna objaśniana",
+       y = "Liczebność", fill = 'Prawdopodobieństwo zawału serca') +theme(axis.text = element_text(size = 10 ), axis.title = element_text(size = 10 ))+
+  scale_fill_manual(values = c("0" = "lightpink", "1" = "lightblue"), 
+                    labels = c("0" = "Mniejsze prawdopodobieństwo", "1" = "Większe prawdopodobieństwo"))
+```
+
+**Sex**
+
+```{r}
+podsumowanie_płeć <- data %>%
+  group_by(sex) %>%
+  summarise(liczba = n())
+
+podsumowanie_płeć$sex <- c("Kobieta", "Mężczyzna")
+ggplot(podsumowanie_płeć, aes(x="", y=liczba, fill = sex)) +
+  geom_bar(stat="identity", width=1, color="white") +
+  coord_polar("y", start = 0) +
+  theme_void() +
+  labs(title = "Procentowy rozkład płci pacjentów", fill = "Płeć") +
+  scale_fill_manual(values = c("Mężczyzna" = "lightblue", "Kobieta" = "lightpink")) +
+  geom_text(aes(label = round(liczba/nrow(data) * 100,2)), position = position_stack(vjust = 0.5), color = "white")
+```
+```{r}
+# piramidu wieku
+# Stworzenie dwóch ramki danych dla każdej płci
+mezczyzni <- data[data$sex == 1, ]
+kobiety <- data[data$sex == 0, ]
+
+# Stworzenie tabeli przestawnej dla mężczyzn
+pivot_mezczyzni <- table(cut(mezczyzni$age, breaks = seq(25, 80, by = 5)))
+
+# Stworzenie tabeli przestawnej dla kobiet
+pivot_kobiety <- table(cut(kobiety$age, breaks = seq(25, 80, by = 5)))
+
+# Utworzenie nowego ramki danych dla wykresu mężczyzn
+df_mezczyzni <- data.frame(Przedzial = names(pivot_mezczyzni), Liczba_osob = as.numeric(pivot_mezczyzni))
+
+# Utworzenie nowego ramki danych dla wykresu kobiet
+df_kobiety <- data.frame(Przedzial = names(pivot_kobiety), Liczba_osob = as.numeric(pivot_kobiety))
+
+# Dodanie kolumny z płcią do obu ramion danych
+df_kobiety$Płeć <- "Kobieta"
+df_mezczyzni$Płeć <- "Mężczyzna"
+
+# odsetek
+df_kobiety$odsetek <- df_kobiety$Liczba_osob/sum(df_kobiety$Liczba_osob) * 100
+df_mezczyzni$odsetek <- df_mezczyzni$Liczba_osob/sum(df_mezczyzni$Liczba_osob) * 100
+
+# Scalanie ramion danych w jedną ramkę danych
+df_piramida <- rbind(df_kobiety, df_mezczyzni)
+
+df_piramida %>% mutate(
+  Liczba_osob = ifelse(Płeć=="Mężczyzna", Liczba_osob*(-1),
+                      Liczba_osob*1))%>%
+  ggplot(aes(x = Przedzial, y = Liczba_osob, fill=Płeć)) + 
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  scale_y_continuous(labels = abs) +
+  labs(x = "Grupa wiekowa", y = "Liczebność grupy", 
+       title = "Piramida wieku pacjentów", fill = "Płeć") +
+  scale_fill_brewer(palette="Pastel1") 
+  #geom_text(data = df_piramida, aes(x = Przedzial, y = Liczba_osob, label = Liczba_osob), vjust = ifelse(df_piramida$Płeć == "Mężczyzna", 1.5, -0.5))
+
+df_piramida %>% mutate(
+  odsetek = ifelse(Płeć=="Mężczyzna", odsetek*(-1),
+                      odsetek*1))%>%
+  ggplot(aes(x = Przedzial, y = odsetek, fill=Płeć)) + 
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  scale_y_continuous(labels = abs) +
+  labs(x = "Grupa wiekowa", y = "Odsetek", 
+       title = "Piramida wieku pacjentów \n - odsetek jaki pełni liczebność grupy w stosunku do liczebności płci", fill = "Płeć") +
+  scale_fill_brewer(palette="Pastel1") 
+  #geom_text(data = df_piramida, aes(x = Przedzial, y = Liczba_osob, label = Liczba_osob), vjust = ifelse(df_piramida$Płeć == "Mężczyzna", 1.5, -0.5))
+
+mean(data[data$sex == 0,]$age)
+mean(data[data$sex == 1,]$age)
+sum(data[data$sex == 0,]$age > 50) / sum(data$sex == 0)
+sum(data[data$sex == 1,]$age > 50) / sum(data$sex == 1)
+```
+
+
+```{r}
+ggplot(data, aes(x = sex, fill = target)) +
+  geom_bar(position = 'fill') +
+  labs(title = "Procentowy rozkład ryzyka zawału serca w zależności od płci",
+       x = "Płeć",
+       y = "Liczebność", fill = 'Prawdopodobieństwo zawału serca') +
+  theme(axis.text = element_text(size = 10 ), axis.title = element_text(size = 10 ))+
+  scale_x_discrete(labels = c("0" = "Kobieta", "1" = "Mężczyzna")) + 
+  scale_fill_manual(values = c("0" = "lightpink", "1" = "lightblue"), 
+                    labels = c("0" = "Mniejsze prawdopodobieństwo", "1" = "Większe prawdopodobieństwo"))
+# procent kobiet z zwiększonym ryzykiem
+sum(data[data$sex == 0,]$target == 1) / nrow(data[data$sex == 0,])
+```
+
+
+**Cp**
+
+```{r}
+ggplot(data, aes(x = reorder(cp, -table(cp)[cp]), fill = target)) +
+  geom_bar() +
+  labs(title = "Rozkład zmiennej określającej typ bólu w klatce piersiowej",
+       x = "Typ bólu w klatce piersiowej",
+       y = "Liczebność", fill = 'Prawdopodobieństwo zawału serca') +theme(axis.text = element_text(size = 10 ), axis.title = element_text(size = 10 ))+
+  scale_fill_manual(values = c("0" = "lightpink", "1" = "lightblue"), 
+                    labels = c("0" = "Mniejsze prawdopodobieństwo", "1" = "Większe prawdopodobieństwo"))
+```
+
+
+
+**fbs**
+```{r}
+ggplot(data, aes(x = fbs, fill = target)) +
+  geom_bar() +
+  labs(title = "Rozkład poziomu cukru we krwi na czczo ",
+       x = "Poziom cukru we krwi na czczo ",
+       y = "Liczebność", fill = 'Prawdopodobieństwo zawału serca')+theme(axis.text = element_text(size = 10 ), axis.title = element_text(size = 10 ))+
+  scale_fill_manual(values = c("0" = "lightpink", "1" = "lightblue"), 
+                    labels = c("0" = "Mniejsze prawdopodobieństwo", "1" = "Większe prawdopodobieństwo"))
+```
+
+
+**restecg**
+
+```{r}
+ggplot(data, aes(x = reorder(restecg, -table(restecg)[restecg]), fill = target)) +
+  geom_bar() +
+  labs(title = "Rozkład spoczynkowych wyników elektrokardiogramu ",
+       x = "Spoczynkowe wyniki elektrokardiogramu ",
+       y = "Liczebność", fill = 'Prawdopodobieństwo zawału serca')  +theme(axis.text = element_text(size = 10 ), axis.title = element_text(size = 10 ))+
+  scale_fill_manual(values = c("0" = "lightpink", "1" = "lightblue"), 
+                    labels = c("0" = "Mniejsze prawdopodobieństwo", "1" = "Większe prawdopodobieństwo"))
+```
+
+**exang**
+
+```{r}
+ggplot(data, aes(x = reorder(exang, -table(exang)[exang]), fill = target)) +
+  geom_bar() +
+  labs(title = "Rozkład dławicy wysiłkowej",
+       x = "Dławica wysiłkowa",
+       y = "Liczebność", fill = "Prawdopodobieństwo zawału serca") + theme(axis.text = element_text(size = 10 ), axis.title = element_text(size = 10 )) +
+    scale_x_discrete(labels = c("0" = "nie", "1" = "tak")) + 
+  scale_fill_manual(values = c("0" = "lightpink", "1" = "lightblue"),
+                    labels = c("0" = "Mniejsze prawdopodobieństwo", "1" = "Większe prawdopodobieństwo"))
+```
+
+**slope**
+
+```{r}
+ggplot(data, aes(x = reorder(slope, -table(slope)[slope]), fill = target)) +
+  geom_bar() +
+  labs(title = "Rozkład nachylenia szczytowego odcinka ST podczas ćwiczenia",
+       x = "Nachylenie szczytowego odcinka ST podczas ćwiczenia",
+       y = "Liczebność", fill = "Prawdopodobieństwo zawału serca") + theme(axis.text = element_text(size = 10 ), axis.title = element_text(size = 10 )) +
+    scale_x_discrete(labels = c("0" = "wznoszące się", "1" = "płaskie", 
+                                "2" = "opadające")) + 
+  scale_fill_manual(values = c("0" = "lightpink", "1" = "lightblue"),
+                    labels = c("0" = "Mniejsze prawdopodobieństwo", "1" = "Większe prawdopodobieństwo"))
+```
+**thal**
+
+```{r}
+data[data$thal == 3,]$thal <- 0
+```
+
+
+```{r}
+ggplot(data, aes(x = reorder(thal, -table(thal)[thal]), fill = target)) +
+  geom_bar() +
+  labs(title = "Rozkład typów wady serca",
+       x = "Typ wady serca",
+       y = "Liczebność", fill = "Prawdopodobieństwo zawału serca") + theme(axis.text = element_text(size = 10 ), axis.title = element_text(size = 10 )) +
+    scale_x_discrete(labels = c("0" = "normalny", "1" = "usunięta usterka", 
+                                "2" = "wada odwracalna")) + 
+  scale_fill_manual(values = c("0" = "lightpink", "1" = "lightblue"),
+                    labels = c("0" = "Mniejsze prawdopodobieństwo", "1" = "Większe prawdopodobieństwo"))
+```
+
+### Sprawdzenie korelacji parami zmiennych objaśniających
+
+```{r}
+round(cor(data[,c(1,4,5,8,10,12)]),3)
+corrplot(cor(data[,c(1,4,5,8,10,12)]), method = 'number', col=brewer.pal(n=8, name="PuOr"), title = 'Macierz korelacji zmiennych ilościowych', mar=c(0,0,1,0))
+```
+
+```{r}
+# 4 - trestbp
+ks.test(data[data$exang=="0", 8], data[data$exang=="1", 8])
+# 10 - oldpeak
+ks.test(data[data$exang=="0", 10], data[data$exang=="1", 10])
+```
+
+```{r}
+categorical_vars <- sapply(data, is.factor)
+
+# Macierz do przechowywania współczynników V Craméra
+v_cramer_matrix <- matrix(NA, nrow = sum(categorical_vars), ncol = sum(categorical_vars),
+                          dimnames = list(names(data)[categorical_vars], names(data)[categorical_vars]))
+for (i in 1:sum(categorical_vars)) {
+  for (j in 1:sum(categorical_vars)) {
+    if (i != j) {
+      # Obliczenie tablicy kontyngencji
+      contingency_table <- table(data[, i], data[, j])
+      
+      # Obliczenie współczynnika V Craméra
+      cramers_v <- assocstats(contingency_table)$cramer
+      
+      # Zapisanie wyniku do macierzy
+      v_cramer_matrix[i, j] <- cramers_v
+    }
+  }
+}
+v_cramer_matrix <- as.data.frame(v_cramer_matrix)
+v_cramer_matrix <- round(v_cramer_matrix,2)
+print("Macierz współczynników V Craméra:")
+print(v_cramer_matrix)
+print(v_cramer_matrix > 0.5)
+write_xlsx(v_cramer_matrix, "v_cramer.xlsx")
+```
+
+Usunięcie zmiennej `exang`.
+
+```{r}
+data1 <- data[,-9]
+```
+
+
+###  Podział zbioru na uczący i testowy
+
+```{r}
+set.seed(1257)     
+n <- nrow(data1)
+liczby_losowe <- sample(c(1:n), round(0.7*n), replace = FALSE) 
+data_uczacy <- data1[liczby_losowe,]
+data_testowy <- data1[-liczby_losowe,]
+```
+
+```{r}
+round(table(data1$target)/n*100,2) #w całych zbiorze
+round(table(data_uczacy$target)/nrow(data_uczacy)*100,2) #w uczącym
+round(table(data_testowy$target)/nrow(data_testowy)*100,2) #w testowym
+
+```
+
+### Estymacja modelu dwumianowego logitowego
+
+```{r}
+logit0 <- glm(target ~ age + sex + cp + trestbps + chol + fbs + restecg + thalach  + oldpeak + slope + ca + thal, data = data_uczacy, family = binomial)
+summary(logit0)
+```
+
+```{r}
+
+summary_logit0 <- summary(logit0)
+
+tidy_logit0 <- tidy(logit0)
+
+write.xlsx(tidy_logit0, file = "summary_logit0.xlsx")
+
+```
+
+
+```{r}
+lrtest(logit0)
+waldtest(logit0)
+```
+
+```{r}
+vif(logit0)
+```
+
+```{r}
+logit1 <- step(logit0) #domyślny
+summary(logit1)
+``` 
+
+```{r}
+logit3 <- step(logit0, direction = "backward")
+summary(logit3)
+```
+
+```{r}
+lrtest(logit1)
+waldtest(logit1)
+```
+
+```{r}
+vif(logit1)
+```
+
+
+```{r}
+summary(logit1)
+```
+
+```{r}
+summary_logit1 <- summary(logit1)
+
+tidy_logit1 <- tidy(logit1)
+
+write.xlsx(tidy_logit1, file = "summary_logit1.xlsx")
+```
+
+
+### Estymacja modelu dwumianowego probitowego
+
+```{r}
+probit0 <- glm(target ~ age + sex + cp + trestbps + chol + fbs + restecg + thalach  + oldpeak + slope + ca + thal, data = data_uczacy, family = binomial(link=probit))
+summary(probit0)
+```
+
+```{r}
+summary_probit0 <- summary(probit0)
+
+tidy_probit0 <- tidy(probit0)
+
+write.xlsx(tidy_probit0, file = "summary_probit0.xlsx")
+```
+
+
+```{r}
+probit1 <- step(probit0) #domyślny
+summary(probit1)
+```
+
+```{r}
+probit2 <- step(probit0, direction = "backward") #domyślny
+summary(probit2)
+```
+```{r}
+summary_probit1 <- summary(probit1)
+
+tidy_probit1 <- tidy(probit1)
+
+write.xlsx(tidy_probit1, file = "summary_probit1.xlsx")
+```
+
+
+
+### Model dwumianowy logitowy z interakcją
+
+```{r}
+logit_inter0 <- glm(target ~  (sex + cp + chol + thalach + oldpeak + ca +thal)^2 , data = data_uczacy, family = binomial)
+summary(logit_inter0)
+```
+
+
+
+```{r}
+logit_inter1 <- glm(target ~  (sex + cp  + thalach + oldpeak + ca +thal)^2 , data = data_uczacy, family = binomial)
+summary(logit_inter1)
+```
+
+```{r}
+logit_inter2 <- glm(target ~  sex + cp +  thalach  + oldpeak +  ca +thal + cp:ca  + oldpeak:thal, data = data_uczacy, family = binomial)
+summary(logit_inter2)
+```
+```{r}
+summary_logit_inter <- summary(logit_inter2)
+
+tidy_logit_inter <- tidy(logit_inter2)
+
+write.xlsx(tidy_logit_inter, file = "summary_logit_inter.xlsx")
+```
+
+### Porównanie dobroci dopasowania modeli logitowego i probitowego
+
+```{r}
+ocena_modelu_dwum <- function(model) {
+  kryterium_AIC <- model$aic
+  McFadden<- pR2(model)[4]
+  Cragg_Uhler<- pR2(model)[6]
+  ocena <- data.frame(kryterium_AIC, McFadden, Cragg_Uhler)
+  return(ocena)
+}
+```
+
+
+```{r}
+wyniki_oceny <- rbind(
+  model_logit_2=ocena_modelu_dwum(logit1),
+  model_probit_2=ocena_modelu_dwum(probit1),
+  model_logit_inter=ocena_modelu_dwum(logit_inter2))
+wyniki_oceny
+write_xlsx(as.data.frame(wyniki_oceny), "wyniki.xlsx")
+```
+
+```{r}
+p <- table(data_uczacy$target)[2]/nrow(data_uczacy)
+
+cat("Tablica trafności dla modelu logitowego - próba ucząca\n")
+tab_traf <- data.frame(obserwowane=logit1$y, przewidywane=ifelse(logit1$fitted.values>p, 1, 0))
+table(tab_traf)
+
+cat("Tablica trafności dla modelu probitowego - próba ucząca\n")
+tab_traf <- data.frame(obserwowane=probit1$y, przewidywane=ifelse(probit1$fitted.values>p, 1, 0))
+table(tab_traf)
+
+cat("Tablica trafności dla modelu logitowego z interakcją - próba ucząca\n")
+tab_traf <- data.frame(obserwowane=logit_inter2$y, przewidywane=ifelse(logit_inter2$fitted.values>p, 1, 0))
+table(tab_traf)
+
+cat("Tablica trafności dla modelu logitowego - próba testowa\n")
+tab_traf <- data.frame(obserwowane=data_testowy$target, przewidywane=ifelse(predict(logit1, data_testowy, type = "response")>p, 1, 0))
+table(tab_traf)
+
+cat("Tablica trafności dla modelu probitowego - próba testowa\n")
+tab_traf <- data.frame(obserwowane=data_testowy$target, przewidywane=ifelse(predict(probit1, data_testowy, type = "response")>p, 1, 0))
+table(tab_traf)
+
+cat("Tablica trafności dla modelu logitowego z interakcją - próba testowa\n")
+tab_traf <- data.frame(obserwowane=data_testowy$target, przewidywane=ifelse(predict(logit_inter2, data_testowy, type = "response")>p, 1, 0))
+table(tab_traf)
+
+```
+
+### Miary jakości predykcji
+
+```{r}
+miary_pred <- function(model, dane, Y, p = 0.5) {
+  tab <- table(obserwowane = Y, przewidywane = ifelse(predict(model, dane, type = "response") > p, 1, 0))
+  ACC <- (tab[1,1]+tab[2,2])/sum(tab)
+  ER <- (tab[1,2]+tab[2,1])/sum(tab)
+  SENS <- (tab[2,2])/rowSums(tab)[2]
+  SPEC <- tab[1,1] / rowSums(tab)[1]
+  PPV <- tab[2,2] /colSums(tab) [2]
+  NPV <- tab[1,1] /colSums(tab) [1]
+  miary <- data.frame(ACC, ER,SENS, SPEC,PPV,NPV)
+  return(miary)
+}
+
+```
+
+```{r}
+wyniki_miary_pred <- rbind(
+  model_logit1 = miary_pred(model = logit1, dane = data_uczacy,  Y = data_uczacy$target, p), 
+  model_probit1 = miary_pred(model = probit1, dane = data_uczacy, Y = data_uczacy$target,  p),
+model_logit_inter = miary_pred(model = logit_inter2, dane = data_uczacy, Y = data_uczacy$target,  p))
+wyniki_miary_pred
+write_xlsx(wyniki_miary_pred, "wyniki_pred.xlsx")
+```
+
+Zbiór testowy 
+```{r}
+wyniki_miary_pred_test <- rbind(
+  model_logit1 = miary_pred(model = logit1, dane = data_testowy,  Y = data_testowy$target, p), 
+  model_probit1 = miary_pred(model = probit1, dane = data_testowy, Y = data_testowy$target,  p),
+model_logit_inter = miary_pred(model = logit_inter2, dane = data_testowy, Y = data_testowy$target,  p))
+wyniki_miary_pred
+write_xlsx(wyniki_miary_pred_test, "wyniki_pred_test.xlsx")
+```
+
+
+### Krzywa ROC
+
+```{r}
+rocobj1 <- roc(logit1$y, logit1$fitted.values)
+rocobj1_t <- roc(data_testowy$target, predict(logit1, data_testowy, type = "response"))
+plot(rocobj1, main = "krzywe ROC dla modelu logitowego", col="red")
+lines(rocobj1_t, col="blue")
+
+rocobj2 <- roc(probit1$y, probit1$fitted.values)
+rocobj2_t <- roc(data_testowy$target, predict(probit1, data_testowy, type = "response"))
+plot(rocobj2, main = "krzywe ROC dla modelu probitowego", col="red")
+lines(rocobj2_t, col="blue")
+
+rocobj3 <- roc(logit_inter2$y, logit_inter2$fitted.values)
+rocobj3_t <- roc(data_testowy$target, predict(logit_inter2, data_testowy, type = "response"))
+plot(rocobj3, main = "krzywe ROC dla modelu logitowego z interakcją", col="red")
+lines(rocobj3_t, col="blue")
+```
+Pole powierzchni pod krzywą ROC
+```{r message=FALSE}
+cat("AUC dla zbioru uczącego\n")
+auc(rocobj1)
+auc(rocobj2)
+auc(rocobj3)
+cat("\nAUC dla zbioru testowego\n")
+auc(rocobj1_t)
+auc(rocobj2_t)
+auc(rocobj3_t)
+```
+
+## Interpretacja modelu 
+
+```{r}
+summary(logit1)
+```
+Zamiana grupy referencyjnej
+```{r}
+data_uczacy$sex <- relevel(data_uczacy$sex, ref="1")
+data_uczacy$thal <- relevel(data_uczacy$thal, ref="1")
+```
+
+
+```{r}
+logit1 <- glm(target ~  sex + cp +  chol + thalach  + oldpeak +  ca + thal, data = data_uczacy, family = binomial)
+summary(logit1)
+```
+
+```{r}
+summary_logit1<- summary(logit1)
+
+tidy_logit1 <- tidy(logit1)
+
+write.xlsx(tidy_logit1, file = "summary_logit1.xlsx")
+```
+
+```{r}
+round(exp(logit1$coefficients),3)
+```
+
+
